@@ -28,3 +28,10 @@ export function hexToRgb(hex: string): [number, number, number] | null {
     ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)]
     : null;
 }
+
+export const STATUS_COLORS: Record<string, string> = {
+  approved: "text-emerald-400",
+  needs_refinement: "text-amber-400",
+  rejected: "text-red-400",
+  pending: "text-gray-400",
+};
