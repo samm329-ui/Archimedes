@@ -21,6 +21,7 @@ PRD §6, §7 complete pipeline:
   17. Six-layer structural validation
   18. Final gate
 """
+
 from __future__ import annotations
 
 import os
@@ -58,7 +59,10 @@ from backend.pipeline.validator import validate_template
 from backend.pipeline.diagnostics import DiagnosticReport
 from backend.pipeline.error_handler import ErrorAccumulator, safe_execute
 from backend.pipeline.provenance import ProvenanceRegistry
-from backend.schemas.validation_schema import FullValidationReport, LayerValidationRecord
+from backend.schemas.validation_schema import (
+    FullValidationReport,
+    LayerValidationRecord,
+)
 
 
 app = FastAPI(
@@ -66,7 +70,9 @@ app = FastAPI(
     description="Deterministic closed-loop: MP4 → JSON → render → validate.",
     version="2.0.0",
 )
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 
 
 class PipelineResult(BaseModel):
@@ -94,7 +100,9 @@ def _six_layer_validation(
         layer_name="detection_confidence_filter",
         passed=frac_low < 0.5,
         score=round(1.0 - frac_low, 4),
-        failure_reasons=[f"{len(low_conf)} low-confidence elements"] if low_conf else [],
+        failure_reasons=[f"{len(low_conf)} low-confidence elements"]
+        if low_conf
+        else [],
     )
 
     # Layer 2: Tracking stability check
@@ -122,17 +130,20 @@ def _six_layer_validation(
         layer_name="motion_confidence_check",
         passed=len(no_motion) == 0,
         score=round(1.0 - len(no_motion) / max(len(elements), 1), 4),
-        failure_reasons=[f"{len(no_motion)} elements with no motion"] if no_motion else [],
+        failure_reasons=[f"{len(no_motion)} elements with no motion"]
+        if no_motion
+        else [],
     )
 
     # Layer 5: Render validation
     render_ok = template.validation.status in (
-        ValidationStatus.APPROVED, ValidationStatus.NEEDS_REFINEMENT
+        ValidationStatus.APPROVED,
+        ValidationStatus.NEEDS_REFINEMENT,
     )
     l5 = LayerValidationRecord(
         layer_name="render_validation",
         passed=render_ok,
-        score=template.validation.ssim_score or 0.0,
+        score=max(0.0, template.validation.ssim_score or 0.0),
         failure_reasons=list(template.validation.failure_reasons),
     )
 
@@ -180,15 +191,16 @@ def run_pipeline(video_path: str) -> PipelineResult:
         acc.add(exc.structured)
         diag.finish_stage("ingest")
         diag.finalize()
-        return PipelineResult(status="rejected",
-                              errors=[e.model_dump() for e in acc.all()],
-                              diagnostics=diag.to_dict())
+        return PipelineResult(
+            status="rejected",
+            errors=[e.model_dump() for e in acc.all()],
+            diagnostics=diag.to_dict(),
+        )
     diag.finish_stage("ingest", output_count=1)
 
     # ── 2. Metadata ────────────────────────────────────────────────────────
     diag.start_stage("metadata")
-    ext_meta = safe_execute(lambda: extract_metadata(video_path),
-                            "metadata", acc, None)
+    ext_meta = safe_execute(lambda: extract_metadata(video_path), "metadata", acc, None)
     metadata = ext_meta.video if ext_meta else metadata_base
     if ext_meta:
         acc.add_all(ext_meta.errors)
@@ -196,25 +208,36 @@ def run_pipeline(video_path: str) -> PipelineResult:
 
     # ── 3. Scene detection ─────────────────────────────────────────────────
     diag.start_stage("scene_detection")
-    result = safe_execute(lambda: detect_scenes(video_path, sample_every_n=2),
-                          "scene_detection", acc, ([], []))
+    result = safe_execute(
+        lambda: detect_scenes(video_path, sample_every_n=2),
+        "scene_detection",
+        acc,
+        ([], []),
+    )
     scenes, scene_errors = result
     acc.add_all(scene_errors)
     if not scenes:
         scenes = _whole_video_segment(metadata.frame_count)
-        acc.add(StructuredError(
-            failure_mode=FailureMode.SCENE_BOUNDARY_UNCERTAIN,
-            message="No scenes detected — using whole video",
-            stage="scene_detection", recoverable=True,
-        ))
+        acc.add(
+            StructuredError(
+                failure_mode=FailureMode.SCENE_BOUNDARY_UNCERTAIN,
+                message="No scenes detected — using whole video",
+                stage="scene_detection",
+                recoverable=True,
+            )
+        )
     diag.finish_stage("scene_detection", output_count=len(scenes))
 
     # ── 4. Adaptive frame sampling ─────────────────────────────────────────
     diag.start_stage("frame_sampling")
     plan = safe_execute(
-        lambda: build_sampling_plan(video_path, scenes, metadata.fps,
-                                    target_rate=min(12.0, metadata.fps)),
-        "frame_sampling", acc, None)
+        lambda: build_sampling_plan(
+            video_path, scenes, metadata.fps, target_rate=min(12.0, metadata.fps)
+        ),
+        "frame_sampling",
+        acc,
+        None,
+    )
     if plan:
         acc.add_all(plan.errors)
         frame_indices = plan.frame_indices
@@ -231,9 +254,11 @@ def run_pipeline(video_path: str) -> PipelineResult:
         frame_data = []
     if not frame_data:
         diag.finalize()
-        return PipelineResult(status="rejected",
-                              errors=[e.model_dump() for e in acc.all()],
-                              diagnostics=diag.to_dict())
+        return PipelineResult(
+            status="rejected",
+            errors=[e.model_dump() for e in acc.all()],
+            diagnostics=diag.to_dict(),
+        )
     frame_dict = {idx: f for idx, f in frame_data}
 
     # ── 6. Detection ───────────────────────────────────────────────────────
@@ -263,70 +288,109 @@ def run_pipeline(video_path: str) -> PipelineResult:
         if frame is not None:
             feats = safe_execute(
                 lambda d=det, f=frame: extract_features(
-                    f, d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h,
-                    metadata.width, metadata.height).to_dict(),
-                "feature_extraction", acc, det.features)
+                    f,
+                    d.bbox.x,
+                    d.bbox.y,
+                    d.bbox.w,
+                    d.bbox.h,
+                    metadata.width,
+                    metadata.height,
+                ).to_dict(),
+                "feature_extraction",
+                acc,
+                det.features,
+            )
             det.features = feats
     diag.finish_stage("feature_extraction", output_count=len(all_detections_flat))
 
     # ── 9. Tracking + Re-ID ────────────────────────────────────────────────
     diag.start_stage("tracking")
     tracks, tracking_errors = safe_execute(
-        lambda: track_across_frames(frame_detections),
-        "tracking", acc, ([], []))
+        lambda: track_across_frames(frame_detections), "tracking", acc, ([], [])
+    )
     acc.add_all(tracking_errors)
     diag.record_confidences("tracking", [t.continuity_score for t in tracks])
     diag.finish_stage("tracking", output_count=len(tracks))
     if not tracks:
         diag.finalize()
-        return PipelineResult(status="rejected",
-                              errors=[e.model_dump() for e in acc.all()],
-                              diagnostics=diag.to_dict())
+        return PipelineResult(
+            status="rejected",
+            errors=[e.model_dump() for e in acc.all()],
+            diagnostics=diag.to_dict(),
+        )
 
     # ── 10. Grouping ───────────────────────────────────────────────────────
     diag.start_stage("grouping")
     motion_prelim, _ = safe_execute(
         lambda: analyze_all_tracks(tracks, metadata.width, metadata.height),
-        "grouping", acc, ([], []))
+        "grouping",
+        acc,
+        ([], []),
+    )
     group_assignments, _, group_errors = safe_execute(
         lambda: assign_groups(tracks, motion_prelim, metadata.width, metadata.height),
-        "grouping", acc, ({}, [], []))
+        "grouping",
+        acc,
+        ({}, [], []),
+    )
     acc.add_all(group_errors)
-    diag.finish_stage("grouping",
-        output_count=sum(1 for a in group_assignments.values() if a.group_id))
+    diag.finish_stage(
+        "grouping",
+        output_count=sum(1 for a in group_assignments.values() if a.group_id),
+    )
 
     # ── 11. Layer inference ────────────────────────────────────────────────
     diag.start_stage("layering")
     layer_hypotheses, _, layer_errors = safe_execute(
         lambda: infer_layer_order(tracks, metadata.width, metadata.height),
-        "layering", acc, ({}, [], []))
+        "layering",
+        acc,
+        ({}, [], []),
+    )
     acc.add_all(layer_errors)
     layer_map = {tid: h.layer for tid, h in layer_hypotheses.items()}
-    diag.record_confidences("layering", [h.confidence for h in layer_hypotheses.values()])
+    diag.record_confidences(
+        "layering", [h.confidence for h in layer_hypotheses.values()]
+    )
     diag.finish_stage("layering", output_count=len(layer_hypotheses))
 
     # ── 12. Motion analysis ────────────────────────────────────────────────
     diag.start_stage("motion_analysis")
     motion_elements, motion_errors = safe_execute(
         lambda: analyze_all_tracks(tracks, metadata.width, metadata.height),
-        "motion_analysis", acc, ([], []))
+        "motion_analysis",
+        acc,
+        ([], []),
+    )
     acc.add_all(motion_errors)
-    diag.record_confidences("motion_analysis", [me.motion_confidence for me in motion_elements])
+    diag.record_confidences(
+        "motion_analysis", [me.motion_confidence for me in motion_elements]
+    )
     diag.finish_stage("motion_analysis", output_count=len(motion_elements))
 
     # ── 13. Hypothesis consolidation ──────────────────────────────────────
     diag.start_stage("hypothesis_engine")
     for me in motion_elements:
         me.motion_hypotheses = select_best_motion_hypotheses(
-            me.motion_hypotheses, max_per_primitive=2)
+            me.motion_hypotheses, max_per_primitive=2
+        )
     diag.finish_stage("hypothesis_engine", output_count=len(motion_elements))
 
     # ── 14. Role assignment ────────────────────────────────────────────────
     diag.start_stage("role_assignment")
     role_assignments, role_errors = safe_execute(
-        lambda: assign_roles(tracks, motion_elements, metadata.width,
-                             metadata.height, metadata.frame_count, layer_map),
-        "role_assignment", acc, ({}, []))
+        lambda: assign_roles(
+            tracks,
+            motion_elements,
+            metadata.width,
+            metadata.height,
+            metadata.frame_count,
+            layer_map,
+        ),
+        "role_assignment",
+        acc,
+        ({}, []),
+    )
     acc.add_all(role_errors)
     diag.finish_stage("role_assignment", output_count=len(role_assignments))
 
@@ -334,17 +398,26 @@ def run_pipeline(video_path: str) -> PipelineResult:
     diag.start_stage("schema_builder")
     build_result = safe_execute(
         lambda: build_template(
-            metadata=metadata, scenes=scenes, tracks=tracks,
-            motion_elements=motion_elements, accumulated_errors=acc.all(),
-            group_assignments=group_assignments, layer_map=layer_map,
+            metadata=metadata,
+            scenes=scenes,
+            tracks=tracks,
+            motion_elements=motion_elements,
+            accumulated_errors=acc.all(),
+            group_assignments=group_assignments,
+            layer_map=layer_map,
             role_assignments=role_assignments,
         ),
-        "schema_builder", acc, None)
+        "schema_builder",
+        acc,
+        None,
+    )
     if build_result is None:
         diag.finalize()
-        return PipelineResult(status="rejected",
-                              errors=[e.model_dump() for e in acc.all()],
-                              diagnostics=diag.to_dict())
+        return PipelineResult(
+            status="rejected",
+            errors=[e.model_dump() for e in acc.all()],
+            diagnostics=diag.to_dict(),
+        )
     template, build_errors = build_result
     acc.add_all(build_errors)
     diag.record_confidences("schema_builder", [e.confidence for e in template.elements])
@@ -352,22 +425,33 @@ def run_pipeline(video_path: str) -> PipelineResult:
 
     # ── 16. Render + compare ───────────────────────────────────────────────
     diag.start_stage("render_loop")
-    validation_frames = frame_data[::max(1, len(frame_data) // 5)][:5]
+    validation_frames = frame_data[:: max(1, len(frame_data) // 5)][:5]
     render_result_tuple = safe_execute(
         lambda: run_render_validation(template, validation_frames),
-        "render_loop", acc, (template, template.validation, []))
+        "render_loop",
+        acc,
+        (template, template.validation, []),
+    )
     template, render_result, render_errors = render_result_tuple
     acc.add_all(render_errors)
     diag.refinement_count = render_result.refinement_attempts
-    diag.finish_stage("render_loop",
-        notes=[f"SSIM={render_result.ssim_score}", f"status={render_result.status.value}"])
+    diag.finish_stage(
+        "render_loop",
+        notes=[
+            f"SSIM={render_result.ssim_score}",
+            f"status={render_result.status.value}",
+        ],
+    )
 
     # ── 17. Six-layer validation ───────────────────────────────────────────
     diag.start_stage("validator")
     struct_result, struct_errors = safe_execute(
-        lambda: validate_template(template), "validator", acc, (template.validation, []))
+        lambda: validate_template(template), "validator", acc, (template.validation, [])
+    )
     acc.add_all(struct_errors)
-    full_report = _six_layer_validation(template, tracks, motion_elements, group_assignments)
+    full_report = _six_layer_validation(
+        template, tracks, motion_elements, group_assignments
+    )
     diag.finish_stage("validator")
 
     # ── 18. Final gate ─────────────────────────────────────────────────────
@@ -383,7 +467,7 @@ def run_pipeline(video_path: str) -> PipelineResult:
     template.validation = render_result
     template.validation.failure_reasons.extend(struct_result.failure_reasons)
     template.errors = acc.all()
-    diag.passed_validation = (final_status == "approved")
+    diag.passed_validation = final_status == "approved"
     diag.finalize()
     template.provenance["diagnostics"] = diag.to_dict()
     template.provenance["provenance_summary"] = prov.summary()
@@ -431,4 +515,5 @@ def analyze_video_path(path: str) -> PipelineResult:
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
