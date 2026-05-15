@@ -8,13 +8,13 @@ interface Hypothesis {
 }
 
 interface HypothesisPanelProps {
-  elementId: string;
-  hypotheses: Hypothesis[];
+  elementId?: string;
+  hypotheses?: Hypothesis[];
   selected?: string;
   onSelect: (id: string) => void;
 }
 
-export default function HypothesisPanel({ elementId, hypotheses, selected, onSelect }: HypothesisPanelProps) {
+export default function HypothesisPanel({ elementId = "", hypotheses = [], selected, onSelect }: HypothesisPanelProps) {
   return (
     <div className="bg-slate-800 rounded-lg p-4">
       <h2 className="text-lg font-semibold text-white mb-2">Motion Hypotheses</h2>
