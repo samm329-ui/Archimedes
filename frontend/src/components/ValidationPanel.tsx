@@ -8,12 +8,12 @@ interface ValidationLayer {
 }
 
 interface ValidationPanelProps {
-  layers: ValidationLayer[];
-  overallStatus: "approved" | "needs_refinement" | "rejected" | "pending";
+  layers?: ValidationLayer[];
+  overallStatus?: string;
 }
 
-export default function ValidationPanel({ layers, overallStatus }: ValidationPanelProps) {
-  const statusColors = {
+export default function ValidationPanel({ layers = [], overallStatus = "pending" }: ValidationPanelProps) {
+  const statusColors: Record<string, string> = {
     approved: "bg-emerald-500",
     needs_refinement: "bg-amber-500",
     rejected: "bg-red-500",
