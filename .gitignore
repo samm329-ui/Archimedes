@@ -1,0 +1,6 @@
+# graphify outputs
+graphify-out/
+
+# opencode/agent cache
+.opencode/
+.agents/
