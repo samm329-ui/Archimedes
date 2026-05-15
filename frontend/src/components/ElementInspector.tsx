@@ -7,7 +7,13 @@ interface ElementInspectorProps {
     id: string;
     type: string;
     confidence: number;
-    motion?: string[];
+    motion?: Array<{
+      primitive: string;
+      easing: string;
+      from_value: number;
+      to_value: number;
+      confidence: number;
+    }>;
   }>;
 }
 
@@ -32,14 +38,14 @@ export default function ElementInspector({ elements }: ElementInspectorProps) {
                 <div className="text-sm text-slate-400">{el.type}</div>
               </div>
               <div className="text-sm font-medium text-emerald-400">
-                {Math.round(el.confidence * 100)}%
+                {Math.round((el.confidence ?? 0) * 100)}%
               </div>
             </div>
             {el.motion && el.motion.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
                 {el.motion.map((m, i) => (
                   <span key={i} className="text-xs bg-slate-600 px-2 py-0.5 rounded text-slate-300">
-                    {m}
+                    {m.primitive ?? "unknown"} ({m.easing ?? "linear"})
                   </span>
                 ))}
               </div>
