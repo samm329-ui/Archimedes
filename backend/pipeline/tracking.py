@@ -8,6 +8,7 @@ Rules:
   - Confidence decays when a track is not observed
   - Never silently lose a track — record track_lost events
 """
+
 from __future__ import annotations
 
 import uuid
@@ -29,12 +30,12 @@ from backend.schemas import (
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 
-IOU_MATCH_THRESHOLD = 0.30       # Minimum IoU to consider same element
-FEATURE_MATCH_WEIGHT = 0.35      # Weight of feature similarity in matching
-IOU_WEIGHT = 0.65                # Weight of IoU in matching
-MAX_MISSING_FRAMES = 10          # Frames before a track is considered lost
-CONFIDENCE_DECAY = 0.08          # Per-frame confidence decay when not observed
-MIN_TRACK_CONFIDENCE = 0.20      # Below this → mark as lost
+IOU_MATCH_THRESHOLD = 0.30  # Minimum IoU to consider same element
+FEATURE_MATCH_WEIGHT = 0.35  # Weight of feature similarity in matching
+IOU_WEIGHT = 0.65  # Weight of IoU in matching
+MAX_MISSING_FRAMES = 10  # Frames before a track is considered lost
+CONFIDENCE_DECAY = 0.08  # Per-frame confidence decay when not observed
+MIN_TRACK_CONFIDENCE = 0.20  # Below this → mark as lost
 
 
 @dataclass
@@ -45,6 +46,7 @@ class ActiveTrack:
     last_features: dict
     type_candidates: list[TypeCandidate]
     bbox_sequence: list[tuple[int, BoundingBox]] = field(default_factory=list)
+    _feature_cache: dict = field(default_factory=dict)
     continuity_score: float = 1.0
     occlusion_score: float = 0.0
     missing_frames: int = 0
@@ -146,12 +148,18 @@ class Tracker:
                     best_score = score
                     best_det = det
 
-            if best_det is not None and best_score >= (IOU_MATCH_THRESHOLD * IOU_WEIGHT):
+            if best_det is not None and best_score >= (
+                IOU_MATCH_THRESHOLD * IOU_WEIGHT
+            ):
                 # Matched
                 track.last_bbox = best_det.bbox
                 track.last_frame = frame_index
                 track.last_features = best_det.features
                 track.bbox_sequence.append((frame_index, best_det.bbox))
+                if best_det.features.get("text_content"):
+                    track._feature_cache["text_content"] = best_det.features[
+                        "text_content"
+                    ]
                 track.missing_frames = 0
                 track.continuity_score = min(1.0, track.continuity_score + 0.05)
                 # Merge type candidates
@@ -171,6 +179,9 @@ class Tracker:
                 last_features=det.features,
                 type_candidates=det.type_candidates,
                 bbox_sequence=[(frame_index, det.bbox)],
+                _feature_cache={"text_content": det.features.get("text_content")}
+                if det.features.get("text_content")
+                else {},
                 continuity_score=0.8,
             )
             self._active[tid] = new_track
@@ -182,22 +193,28 @@ class Tracker:
                 track.missing_frames > MAX_MISSING_FRAMES
                 or track.continuity_score < MIN_TRACK_CONFIDENCE
             ):
-                self._lost_events.append({
-                    "track_id": track_id,
-                    "last_frame": track.last_frame,
-                    "reason": "max_missing" if track.missing_frames > MAX_MISSING_FRAMES else "low_confidence",
-                })
-                errors.append(StructuredError(
-                    failure_mode=FailureMode.TRACK_LOST,
-                    message=f"Track {track_id} lost at frame {frame_index}",
-                    stage="tracking",
-                    recoverable=True,
-                    details={
+                self._lost_events.append(
+                    {
                         "track_id": track_id,
-                        "missing_frames": track.missing_frames,
-                        "continuity_score": track.continuity_score,
-                    },
-                ))
+                        "last_frame": track.last_frame,
+                        "reason": "max_missing"
+                        if track.missing_frames > MAX_MISSING_FRAMES
+                        else "low_confidence",
+                    }
+                )
+                errors.append(
+                    StructuredError(
+                        failure_mode=FailureMode.TRACK_LOST,
+                        message=f"Track {track_id} lost at frame {frame_index}",
+                        stage="tracking",
+                        recoverable=True,
+                        details={
+                            "track_id": track_id,
+                            "missing_frames": track.missing_frames,
+                            "continuity_score": track.continuity_score,
+                        },
+                    )
+                )
                 self._completed.append(track)
                 to_retire.append(track_id)
 
@@ -210,23 +227,27 @@ class Tracker:
         # ── Build TrackedElement snapshots ────────────────────────────────
         tracked: list[TrackedElement] = []
         for track in self._active.values():
-            tracked.append(TrackedElement(
-                track_id=track.track_id,
-                element_ids=[],
-                type_candidates=track.type_candidates,
-                bbox_sequence=list(track.bbox_sequence),
-                continuity_score=track.continuity_score,
-                occlusion_score=track.occlusion_score,
-                reid_score=1.0,
-                split_events=[
-                    e["frame_index"] for e in self._split_events
-                    if e.get("track_id") == track.track_id
-                ],
-                merge_events=[
-                    e["frame_index"] for e in self._merge_events
-                    if e.get("track_id") == track.track_id
-                ],
-            ))
+            tracked.append(
+                TrackedElement(
+                    track_id=track.track_id,
+                    element_ids=[],
+                    type_candidates=track.type_candidates,
+                    bbox_sequence=list(track.bbox_sequence),
+                    continuity_score=track.continuity_score,
+                    occlusion_score=track.occlusion_score,
+                    reid_score=1.0,
+                    split_events=[
+                        e["frame_index"]
+                        for e in self._split_events
+                        if e.get("track_id") == track.track_id
+                    ],
+                    merge_events=[
+                        e["frame_index"]
+                        for e in self._merge_events
+                        if e.get("track_id") == track.track_id
+                    ],
+                )
+            )
 
         return tracked, errors
 
@@ -237,17 +258,19 @@ class Tracker:
         for track in all_tracks:
             if not track.bbox_sequence:
                 continue
-            result.append(TrackedElement(
-                track_id=track.track_id,
-                element_ids=[],
-                type_candidates=track.type_candidates,
-                bbox_sequence=list(track.bbox_sequence),
-                continuity_score=track.continuity_score,
-                occlusion_score=track.occlusion_score,
-                reid_score=1.0,
-                split_events=[],
-                merge_events=[],
-            ))
+            result.append(
+                TrackedElement(
+                    track_id=track.track_id,
+                    element_ids=[],
+                    type_candidates=track.type_candidates,
+                    bbox_sequence=list(track.bbox_sequence),
+                    continuity_score=track.continuity_score,
+                    occlusion_score=track.occlusion_score,
+                    reid_score=1.0,
+                    split_events=[],
+                    merge_events=[],
+                )
+            )
         return result
 
     def _detect_topology_events(self, frame_index: int) -> None:
@@ -257,16 +280,18 @@ class Tracker:
         """
         tracks = list(self._active.values())
         for i, t1 in enumerate(tracks):
-            for t2 in tracks[i + 1:]:
+            for t2 in tracks[i + 1 :]:
                 iou = t1.last_bbox.iou(t2.last_bbox)
                 if iou > 0.7:
                     # Possible merge
-                    self._merge_events.append({
-                        "track_id": t1.track_id,
-                        "other_track_id": t2.track_id,
-                        "frame_index": frame_index,
-                        "iou": iou,
-                    })
+                    self._merge_events.append(
+                        {
+                            "track_id": t1.track_id,
+                            "other_track_id": t2.track_id,
+                            "frame_index": frame_index,
+                            "iou": iou,
+                        }
+                    )
 
 
 def _merge_type_candidates(
@@ -286,6 +311,7 @@ def _merge_type_candidates(
             merged[tc.type.value] = tc.confidence
 
     from backend.schemas import ElementType
+
     return [
         TypeCandidate(type=ElementType(k), confidence=v)
         for k, v in sorted(merged.items(), key=lambda x: -x[1])

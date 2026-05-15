@@ -12,6 +12,7 @@ Rules (unchanged from PRD §21):
   - Never invent structure without evidence
   - Uncertainty stored, not collapsed
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -54,8 +55,14 @@ def _build_layout(
     layer_confidence: float = 0.5,
 ) -> LayoutInfo:
     if not track.bbox_sequence:
-        return LayoutInfo(x_norm=0, y_norm=0, w_norm=0, h_norm=0,
-                         layer=layer, layer_confidence=layer_confidence)
+        return LayoutInfo(
+            x_norm=0,
+            y_norm=0,
+            w_norm=0,
+            h_norm=0,
+            layer=layer,
+            layer_confidence=layer_confidence,
+        )
     bboxes = [b for _, b in track.bbox_sequence]
     x = float(np.median([b.x for b in bboxes]))
     y = float(np.median([b.y for b in bboxes]))
@@ -87,8 +94,9 @@ def _build_timing(track: TrackedElement, fps: float) -> TimingInfo:
     frames = [f for f, _ in track.bbox_sequence]
     enter = min(frames)
     exit_ = max(frames)
-    return TimingInfo(enter_frame=enter, exit_frame=exit_,
-                      duration_frames=exit_ - enter, fps=fps)
+    return TimingInfo(
+        enter_frame=enter, exit_frame=exit_, duration_frames=exit_ - enter, fps=fps
+    )
 
 
 def build_template(
@@ -130,7 +138,9 @@ def build_template(
         if layer_map and track.track_id in layer_map:
             layer_conf = 0.7  # has explicit assignment
 
-        layout = _build_layout(track, metadata.width, metadata.height, layer, layer_conf)
+        layout = _build_layout(
+            track, metadata.width, metadata.height, layer, layer_conf
+        )
         style = _build_style(track)
         timing = _build_timing(track, metadata.fps)
 
@@ -169,47 +179,57 @@ def build_template(
             validation_notes.append(f"Ambiguous type @ {elem_conf:.2f}")
 
         alternatives = [
-            tc for tc in track.type_candidates
+            tc
+            for tc in track.type_candidates
             if tc.type != elem_type and tc.confidence > 0.1
         ]
 
-        template_elements.append(TemplateElement(
-            id=track.track_id,
-            type=elem_type,
-            subtype=None,
-            confidence=round(elem_conf, 4),
-            role_scores=roles,
-            content=None,
-            layout=layout,
-            style=style,
-            motion=motion_hyps,
-            timing=timing,
-            group_id=group_id,
-            layer=layer,
-            alternatives=alternatives,
-            provenance=ProvenanceRecord(
-                source_module="schema_builder",
-                source_frame_range=(timing.enter_frame, timing.exit_frame),
-                method="track_assembly",
+        content = None
+        if elem_type == ElementType.TEXT and track.bbox_sequence:
+            content = track._feature_cache.get("text_content")
+
+        template_elements.append(
+            TemplateElement(
+                id=track.track_id,
+                type=elem_type,
+                subtype=None,
                 confidence=round(elem_conf, 4),
-            ),
-            failure_modes=failure_modes,
-            validation_notes=validation_notes,
-        ))
+                role_scores=roles,
+                content=content,
+                layout=layout,
+                style=style,
+                motion=motion_hyps,
+                timing=timing,
+                group_id=group_id,
+                layer=layer,
+                alternatives=alternatives,
+                provenance=ProvenanceRecord(
+                    source_module="schema_builder",
+                    source_frame_range=(timing.enter_frame, timing.exit_frame),
+                    method="track_assembly",
+                    confidence=round(elem_conf, 4),
+                ),
+                failure_modes=failure_modes,
+                validation_notes=validation_notes,
+            )
+        )
 
     if not template_elements:
-        errors.append(StructuredError(
-            failure_mode=FailureMode.SCHEMA_BUILD_FAILED,
-            message="No elements to assemble into template",
-            stage="schema_builder",
-            recoverable=True,
-        ))
+        errors.append(
+            StructuredError(
+                failure_mode=FailureMode.SCHEMA_BUILD_FAILED,
+                message="No elements to assemble into template",
+                stage="schema_builder",
+                recoverable=True,
+            )
+        )
 
     quality = {
         "element_count": len(template_elements),
         "mean_element_confidence": (
             float(np.mean([e.confidence for e in template_elements]))
-            if template_elements else 0.0
+            if template_elements
+            else 0.0
         ),
         "scene_count": len(scenes),
         "total_errors": len(accumulated_errors) + len(errors),
@@ -218,11 +238,22 @@ def build_template(
 
     provenance = {
         "pipeline_stages": [
-            "ingest", "metadata", "scene_detection", "frame_sampling",
-            "detection", "segmentation", "feature_extraction",
-            "tracking", "reid", "grouping", "layering",
-            "motion_analysis", "curve_fitting", "hypothesis_engine",
-            "role_assignment", "schema_builder",
+            "ingest",
+            "metadata",
+            "scene_detection",
+            "frame_sampling",
+            "detection",
+            "segmentation",
+            "feature_extraction",
+            "tracking",
+            "reid",
+            "grouping",
+            "layering",
+            "motion_analysis",
+            "curve_fitting",
+            "hypothesis_engine",
+            "role_assignment",
+            "schema_builder",
         ],
         "schema_version": "2.0.0",
     }

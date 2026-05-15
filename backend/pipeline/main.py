@@ -301,6 +301,42 @@ def run_pipeline(video_path: str) -> PipelineResult:
                 det.features,
             )
             det.features = feats
+            from backend.schemas import ElementType
+
+            is_text = any(
+                tc.type == ElementType.TEXT and tc.confidence > 0.4
+                for tc in det.type_candidates
+            )
+            if is_text:
+                from backend.pipeline.feature_extraction import _text_content
+
+                gray_f = frame_dict.get(det.frame_index)
+                if gray_f is not None:
+                    import cv2
+
+                    gray_full = cv2.cvtColor(gray_f, cv2.COLOR_BGR2GRAY)
+                    xi, yi, wi, hi = (
+                        int(det.bbox.x),
+                        int(det.bbox.y),
+                        int(det.bbox.w),
+                        int(det.bbox.h),
+                    )
+                    x2 = min(xi + wi, gray_full.shape[1])
+                    y2 = min(yi + hi, gray_full.shape[0])
+                    if x2 > xi and y2 > yi:
+                        roi = (
+                            gray_full[y2 - hi : yi + hi, :]
+                            if y2 > yi and hi > 0
+                            else gray_full[yi : yi + hi, xi : xi + wi]
+                        )
+                        text = _text_content(
+                            gray_full[yi:y2, xi:x2]
+                            if y2 > yi and x2 > xi
+                            else gray_full,
+                            frame,
+                        )
+                        if text:
+                            det.features["text_content"] = text
     diag.finish_stage("feature_extraction", output_count=len(all_detections_flat))
 
     # ── 9. Tracking + Re-ID ────────────────────────────────────────────────

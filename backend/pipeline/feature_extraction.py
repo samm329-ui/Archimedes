@@ -16,10 +16,12 @@ Features computed:
   - Compactness
   - Spatial position (normalized)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from typing import Optional
 import cv2
 import numpy as np
 
@@ -30,24 +32,25 @@ class ElementFeatures:
     All features for one element region.
     Every field is explicitly typed and documented.
     """
+
     # Geometry
-    aspect_ratio: float          # w/h
-    area_pixels: float           # w * h
-    area_norm: float             # fraction of canvas
+    aspect_ratio: float  # w/h
+    area_pixels: float  # w * h
+    area_norm: float  # fraction of canvas
 
     # Color
-    mean_color_bgr: list[int]    # [B, G, R]
-    color_variance: float        # mean per-channel variance
-    dominant_hue: float          # 0–180 (OpenCV HSV scale)
-    saturation_mean: float       # 0–255
+    mean_color_bgr: list[int]  # [B, G, R]
+    color_variance: float  # mean per-channel variance
+    dominant_hue: float  # 0–180 (OpenCV HSV scale)
+    saturation_mean: float  # 0–255
 
     # Texture / structure
-    edge_density: float          # fraction of edge pixels
-    contrast: float              # RMS contrast of grayscale ROI
-    compactness: float           # 4π·A/P² (1 = circle, lower = complex)
+    edge_density: float  # fraction of edge pixels
+    contrast: float  # RMS contrast of grayscale ROI
+    compactness: float  # 4π·A/P² (1 = circle, lower = complex)
 
     # Color histogram (flattened, normalized)
-    color_histogram: list[float]   # 64-bin H + 64-bin S = 128 values
+    color_histogram: list[float]  # 64-bin H + 64-bin S = 128 values
 
     # Spatial (normalized to canvas)
     x_norm: float
@@ -77,7 +80,10 @@ class ElementFeatures:
 
 def _safe_roi(
     frame: np.ndarray,
-    x: int, y: int, w: int, h: int,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract BGR and grayscale ROI, clamped to frame bounds."""
     fh, fw = frame.shape[:2]
@@ -110,7 +116,7 @@ def _compactness(roi_gray: np.ndarray) -> float:
     perimeter = cv2.arcLength(cnt, True)
     if perimeter == 0:
         return 0.0
-    return min(1.0, float((4 * np.pi * area) / (perimeter ** 2)))
+    return min(1.0, float((4 * np.pi * area) / (perimeter**2)))
 
 
 def _color_histogram(roi_bgr: np.ndarray) -> list[float]:
@@ -135,9 +141,29 @@ def _dominant_hue(roi_bgr: np.ndarray) -> float:
     return float(np.argmax(h_hist))
 
 
+def _text_content(roi_gray: np.ndarray, roi_bgr: np.ndarray) -> Optional[str]:
+    try:
+        import pytesseract
+
+        if roi_gray.size == 0:
+            return None
+        roi_resized = cv2.resize(
+            roi_gray, (max(roi_gray.shape[1] * 2, 100), max(roi_gray.shape[0] * 2, 30))
+        )
+        text = pytesseract.image_to_string(roi_resized, config="--psm 7").strip()
+        if text:
+            return text
+    except Exception:
+        pass
+    return None
+
+
 def extract_features(
     frame: np.ndarray,
-    x: float, y: float, w: float, h: float,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
     canvas_width: int,
     canvas_height: int,
 ) -> ElementFeatures:
